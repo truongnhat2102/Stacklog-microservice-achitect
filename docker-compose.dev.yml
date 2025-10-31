@@ -1,0 +1,271 @@
+version: '3.2'
+
+services:
+
+  # --- API Gateway ---
+  api-gateway:
+    image: nginx:1.24.0-alpine
+    container_name: api-gateway
+    ports:
+      - "8080:80"
+    # expose:
+    #   - "80"  
+    restart: always
+    volumes:
+      - ./api-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - app-network
+    depends_on:
+      - authservice
+      - profileservice
+      - taskservice
+      - classservice
+      # - chatservice
+      # - documentservice
+      - scheduleservice
+      - notificationservice
+      # - scoreservice
+      - topicservice
+      # - searchservice
+
+  # --- Prometheus ---
+  # prometheus:
+  #   image: prom/prometheus:v2.52.0
+  #   container_name: prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   restart: always
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #   networks:
+  #     - app-network    
+
+  # --- Zookeeper ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    restart: always
+    networks:
+      - app-network
+
+  # --- Kafka Brokers ---
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    restart: always
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092,EXTERNAL://103.166.183.142:19092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - app-network
+
+  # --- Redis ---
+  redis:
+    image: redis:7.2.4
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli INFO replication | grep -q 'role:master'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      app-network:
+          aliases:
+              - redis-master
+
+  # # --- Auth Service ---
+  authservice:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: authservice
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+    restart: on-failure
+
+  # # --- Profile Service ---
+  profileservice:
+    build:
+      context: ./profile-service
+      dockerfile: Dockerfile
+    container_name: profileservice
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+    restart: on-failure
+
+  # # --- Task Service ---
+  taskservice:
+    build:
+      context: .
+      dockerfile: task-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: taskservice
+    ports:
+      - "2002:2002"
+    restart: always
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+      # --- Class Service ---
+  classservice:
+    build:
+      context: .
+      dockerfile: class-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: classservice
+    ports:
+      - "2003:2003"
+    restart: on-failure
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+          # # --- Chat Service ---
+  chatservice:
+    build:
+      context: ./chat-service
+      dockerfile: Dockerfile
+    container_name: chatservice
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+    restart: on-failure
+            
+        # --- Document Service ---
+  documentservice:
+    build:
+      context: .
+      dockerfile: document-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: documentservice
+    ports:
+      - "2005:2005"
+    restart: on-failure
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+                # # --- Notification Service ---
+  notificationservice:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: notificationservice
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+    restart: on-failure
+
+                # # --- Score Service ---
+  scoreservice:
+    build:
+      context: .
+      dockerfile: score-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: scoreservice
+    ports:
+      - "2008:2008"
+    restart: on-failure
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+  scheduleservice:
+    build:
+      context: .
+      dockerfile: schedule-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: scheduleservice
+    ports:
+      - "2006:2006"
+    restart: always
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+  topicservice:
+    build:
+      context: .
+      dockerfile: topic-service/Dockerfile
+    volumes:
+      - ~/.m2:/root/.m2
+    container_name: topicservice
+    ports:
+      - "2010:2010"
+    restart: always
+    networks:
+      - app-network
+    depends_on:
+      - kafka-1
+      # - kafka-2
+      # - kafka-3
+      - redis
+
+networks:
+  app-network:
+    driver: bridge
